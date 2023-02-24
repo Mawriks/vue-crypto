@@ -70,7 +70,6 @@
           type="button"
           class="my-4 inline-flex items-center py-2 px-4 border border-transparent shadow-sm text-sm leading-4 font-medium rounded-full text-white bg-gray-600 hover:bg-gray-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
         >
-          <!-- Heroicon name: solid/mail -->
           <svg
             class="-ml-0.5 mr-2 h-6 w-6"
             xmlns="http://www.w3.org/2000/svg"
@@ -87,10 +86,39 @@
         </button>
       </section>
       <template v-if="tickers.length">
-        <hr class="w-full border-t border-gray-600 my-4" />
+        <div
+          class="flex items-center justify-between border-t border-gray-200 bg-white px-4 py-3 -mx-4"
+        >
+          <div class="relative rounded-md shadow-sm">
+            <input
+              v-model="filter"
+              type="text"
+              name="price"
+              class="block w-full rounded-md border-gray-300 pr-12 focus:outline-none focus:ring-gray-500 focus:border-gray-500 sm:text-sm"
+              placeholder="Фильтр"
+            />
+          </div>
+          <div class="flex flex-1 justify-end">
+            <button
+              @click="page = page - 1"
+              class="relative inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              v-if="page > 1"
+            >
+              Назад
+            </button>
+            <button
+              @click="page = page + 1"
+              class="relative ml-3 inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              v-if="hasNextPage"
+            >
+              Вперёд
+            </button>
+          </div>
+        </div>
+        <hr class="w-full border-t border-gray-200 mb-4" />
         <dl class="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-3">
           <div
-            v-for="tick in tickers"
+            v-for="tick in pagedTickers"
             :key="tick.name"
             :class="{
               'border-purple-800': selected === tick,
@@ -124,12 +152,13 @@
                   fill-rule="evenodd"
                   d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
                   clip-rule="evenodd"
-                ></path></svg
-              >Удалить
+                ></path>
+              </svg>
+              Удалить
             </button>
           </div>
         </dl>
-        <hr class="w-full border-t border-gray-600 my-4" />
+        <hr class="w-full border-t border-gray-200 my-4" />
       </template>
       <section v-if="selected" class="relative">
         <h3 class="text-lg leading-6 font-medium text-gray-900 my-8">
@@ -137,7 +166,7 @@
         </h3>
         <div class="flex items-end border-gray-600 border-b border-l h-64">
           <div
-            v-for="(bar, idx) in graphNormalize()"
+            v-for="(bar, idx) in graphNormalize"
             :key="idx"
             :style="{ height: `${bar}%` }"
             class="bg-purple-800 border w-10"
@@ -188,7 +217,44 @@ export default {
       error: '',
       coins: null,
       currentCoins: [],
+      timersIds: [],
+      page: 1,
+      filter: '',
     };
+  },
+  computed: {
+    startIndex() {
+      return (this.page - 1) * 6;
+    },
+
+    endIndex() {
+      return this.page * 6;
+    },
+
+    filteredTickers() {
+      return this.tickers.filter((item) =>
+        item.name.includes(this.filter.toUpperCase())
+      );
+    },
+
+    pagedTickers() {
+      return this.filteredTickers.slice(this.startIndex, this.endIndex);
+    },
+
+    hasNextPage() {
+      return this.filteredTickers.length > this.endIndex;
+    },
+
+    graphNormalize() {
+      const maxVal = Math.max(...this.graph);
+      const minVal = Math.min(...this.graph);
+      if (maxVal === minVal) {
+        return this.graph.map(() => 50);
+      }
+      return this.graph.map(
+        (price) => 5 + ((price - minVal) * 95) / (maxVal - minVal)
+      );
+    },
   },
   methods: {
     add() {
@@ -197,22 +263,15 @@ export default {
           name: this.ticker.toUpperCase(),
           price: '-',
         };
-        this.tickers.push(newTicker);
-        setInterval(async () => {
-          const promise = await fetch(
-            `https://min-api.cryptocompare.com/data/price?fsym=${newTicker.name}&tsyms=USD&api_key=0f8f1b3a5c96e0406036df01fa54b9aa4a4135439b3852aca723fd09806eb8d5`
-          );
-          const data = await promise.json();
-          this.tickers.find((t) => t.name === newTicker.name).price =
-            data.USD > 1 ? data.USD.toFixed(2) : data.USD.toPrecision(2);
-          if (this.selected?.name === newTicker.name) {
-            this.graph.push(data.USD);
-          }
-        }, 10000);
+        this.tickers = [...this.tickers, newTicker];
+
+        this.subscribeToUpdate(newTicker.name);
+
         this.ticker = '';
         this.currentCoins = [];
       }
     },
+
     validate() {
       let exists = this.tickers.find(
         (t) => t.name == this.ticker.toUpperCase()
@@ -229,6 +288,7 @@ export default {
       this.error = '';
       return true;
     },
+
     autocomplete() {
       this.currentCoins = [];
       this.error = '';
@@ -240,29 +300,82 @@ export default {
         }, {});
       }
     },
-    graphNormalize() {
-      const maxVal = Math.max(...this.graph);
-      const minVal = Math.min(...this.graph);
-      return this.graph.map((price) => {
-        if (maxVal != minVal) {
-          return 5 + ((price - minVal) * 95) / (maxVal - minVal);
-        } else {
-          return 5;
-        }
-      });
-    },
+
     handleDelete(tickerRemove) {
       if (this.selected === tickerRemove) {
         this.selected = null;
       }
       this.tickers = this.tickers.filter((t) => t != tickerRemove);
+      if (this.tickers.length % 6 === 0) {
+        this.page = this.page > 1 ? this.page - 1 : this.page;
+      }
+      this.timersIds = this.timersIds.filter((item) => {
+        if (item.name === tickerRemove.name) {
+          clearInterval(item.intid);
+        }
+        return item.name !== tickerRemove.name;
+      });
     },
+
     handleSelect(tickerSelected) {
       this.selected = tickerSelected;
       this.graph = [];
     },
+
+    subscribeToUpdate(tickerName) {
+      const intervalId = setInterval(async () => {
+        const promise = await fetch(
+          `https://min-api.cryptocompare.com/data/price?fsym=${tickerName}&tsyms=USD&api_key=0f8f1b3a5c96e0406036df01fa54b9aa4a4135439b3852aca723fd09806eb8d5`
+        );
+        const data = await promise.json();
+        this.tickers.find((t) => t.name === tickerName).price =
+          data.USD > 1 ? data.USD.toFixed(2) : data.USD.toPrecision(2);
+        if (this.selected?.name === tickerName) {
+          this.graph.push(data.USD);
+        }
+      }, 10000);
+      this.timersIds.push({
+        name: tickerName,
+        intid: intervalId,
+      });
+    },
+  },
+
+  watch: {
+    filter() {
+      this.page = 1;
+      const filtrationParam = this.filter ? `&filter=${this.filter}` : '';
+      history.pushState(
+        null,
+        document.title,
+        `${window.location.pathname}?page=${this.page}${filtrationParam}`
+      );
+    },
+    page() {
+      const filtrationParam = this.filter ? `&filter=${this.filter}` : '';
+      history.pushState(
+        null,
+        document.title,
+        `${window.location.pathname}?page=${this.page}${filtrationParam}`
+      );
+    },
+    tickers() {
+      localStorage.setItem('selected-tickers', JSON.stringify(this.tickers));
+    },
   },
   async created() {
+    const windowData = Object.fromEntries(
+      new URL(window.location).searchParams.entries()
+    );
+
+    if (windowData.filter) {
+      this.filter = windowData.filter;
+    }
+
+    if (windowData.page) {
+      this.page = Number(windowData.page);
+    }
+
     if (!this.coins) {
       const promiseCoins = await fetch(
         `https://min-api.cryptocompare.com/data/all/coinlist?summary=true`
@@ -270,6 +383,15 @@ export default {
       const coinsData = await promiseCoins.json();
       this.coins = coinsData.Data;
       this.loaded = true;
+    }
+
+    const loadedTickers = localStorage.getItem('selected-tickers');
+
+    if (loadedTickers) {
+      this.tickers = JSON.parse(loadedTickers);
+      this.tickers.forEach((item) => {
+        this.subscribeToUpdate(item.name);
+      });
     }
   },
 };
