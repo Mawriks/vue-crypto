@@ -121,7 +121,7 @@
             v-for="tick in pagedTickers"
             :key="tick.name"
             :class="{
-              'border-purple-800': selected === tick,
+              'border-purple-800': selectedTicker === tick,
             }"
             class="bg-white overflow-hidden shadow rounded-lg border-4 border-solid cursor-pointer"
           >
@@ -160,9 +160,9 @@
         </dl>
         <hr class="w-full border-t border-gray-200 my-4" />
       </template>
-      <section v-if="selected" class="relative">
+      <section v-if="selectedTicker" class="relative">
         <h3 class="text-lg leading-6 font-medium text-gray-900 my-8">
-          {{ selected.name }} - USD
+          {{ selectedTicker.name }} - USD
         </h3>
         <div class="flex items-end border-gray-600 border-b border-l h-64">
           <div
@@ -173,7 +173,7 @@
           ></div>
         </div>
         <button
-          @click="selected = null"
+          @click="selectedTicker = null"
           type="button"
           class="absolute top-0 right-0"
         >
@@ -205,21 +205,26 @@
 </template>
 
 <script>
+import { loadTicker } from './api';
 export default {
   name: 'App',
   data() {
     return {
       ticker: '',
-      tickers: [],
-      selected: null,
-      graph: [],
-      loaded: false,
+      filter: '',
       error: '',
+
+      tickers: [],
+      selectedTicker: null,
+
+      graph: [],
+
+      loaded: false,
       coins: null,
       currentCoins: [],
       timersIds: [],
+
       page: 1,
-      filter: '',
     };
   },
   computed: {
@@ -254,6 +259,13 @@ export default {
       return this.graph.map(
         (price) => 5 + ((price - minVal) * 95) / (maxVal - minVal)
       );
+    },
+
+    pageStateOptions() {
+      return {
+        filter: this.filter,
+        page: this.page,
+      };
     },
   },
   methods: {
@@ -302,13 +314,12 @@ export default {
     },
 
     handleDelete(tickerRemove) {
-      if (this.selected === tickerRemove) {
-        this.selected = null;
+      if (this.selectedTicker === tickerRemove) {
+        this.selectedTicker = null;
       }
+
       this.tickers = this.tickers.filter((t) => t != tickerRemove);
-      if (this.tickers.length % 6 === 0) {
-        this.page = this.page > 1 ? this.page - 1 : this.page;
-      }
+
       this.timersIds = this.timersIds.filter((item) => {
         if (item.name === tickerRemove.name) {
           clearInterval(item.intid);
@@ -318,20 +329,18 @@ export default {
     },
 
     handleSelect(tickerSelected) {
-      this.selected = tickerSelected;
-      this.graph = [];
+      this.selectedTicker = tickerSelected;
     },
 
     subscribeToUpdate(tickerName) {
       const intervalId = setInterval(async () => {
-        const promise = await fetch(
-          `https://min-api.cryptocompare.com/data/price?fsym=${tickerName}&tsyms=USD&api_key=0f8f1b3a5c96e0406036df01fa54b9aa4a4135439b3852aca723fd09806eb8d5`
-        );
-        const data = await promise.json();
+        const exchangeData = await loadTicker(tickerName);
         this.tickers.find((t) => t.name === tickerName).price =
-          data.USD > 1 ? data.USD.toFixed(2) : data.USD.toPrecision(2);
-        if (this.selected?.name === tickerName) {
-          this.graph.push(data.USD);
+          exchangeData.USD > 1
+            ? exchangeData.USD.toFixed(2)
+            : exchangeData.USD.toPrecision(2);
+        if (this.selectedTicker?.name === tickerName) {
+          this.graph.push(exchangeData.USD);
         }
       }, 10000);
       this.timersIds.push({
@@ -344,25 +353,32 @@ export default {
   watch: {
     filter() {
       this.page = 1;
-      const filtrationParam = this.filter ? `&filter=${this.filter}` : '';
-      history.pushState(
-        null,
-        document.title,
-        `${window.location.pathname}?page=${this.page}${filtrationParam}`
-      );
     },
-    page() {
-      const filtrationParam = this.filter ? `&filter=${this.filter}` : '';
-      history.pushState(
-        null,
-        document.title,
-        `${window.location.pathname}?page=${this.page}${filtrationParam}`
-      );
-    },
+
     tickers() {
       localStorage.setItem('selected-tickers', JSON.stringify(this.tickers));
     },
+
+    pagedTickers() {
+      if (this.pagedTickers === 0 && this.page > 1) {
+        this.page -= 1;
+      }
+    },
+
+    selectedTicker() {
+      this.graph = [];
+    },
+
+    pageStateOptions(options) {
+      const filtrationParam = options.filter ? `&filter=${options.filter}` : '';
+      history.pushState(
+        null,
+        document.title,
+        `${window.location.pathname}?page=${options.page}${filtrationParam}`
+      );
+    },
   },
+
   async created() {
     const windowData = Object.fromEntries(
       new URL(window.location).searchParams.entries()
